@@ -1,19 +1,23 @@
 /**
- * NexioAI dark theme — swap logo later; colors stay centralized here.
+ * NexioAI brand palette (from logo)
+ * Logo blue ~#007bff → primary uses a slightly darker accent for UI
  */
 export const colors = {
-  background: '#0f0f14',
-  surface: '#1a1a24',
-  surfaceElevated: '#242433',
-  border: '#2e2e3d',
-  text: '#f4f4f5',
-  textMuted: '#a1a1aa',
-  primary: '#8b5cf6',
-  primaryDark: '#6d28d9',
-  accent: '#a78bfa',
+  /** Logo circle background */
+  background: '#050a10',
+  surface: '#0a121c',
+  surfaceElevated: '#0f1a28',
+  border: '#1a2a3d',
+  text: '#ffffff',
+  textMuted: '#94a3b8',
+  /** Slightly darker than logo bright blue (#007bff) */
+  primary: '#0066cc',
+  primaryDark: '#004d99',
+  /** Logo brace blue (highlights, links) */
+  accent: '#007bff',
   success: '#22c55e',
   danger: '#ef4444',
-  placeholder: '#3f3f50',
+  placeholder: '#1a2a3d',
 } as const;
 
 export type AppColors = typeof colors;

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Log;
 
 class PassportTokenService
 {
@@ -25,8 +26,19 @@ class PassportTokenService
         $data = json_decode($response->getContent(), true);
 
         if ($response->getStatusCode() >= 400) {
+            $error = $data['message'] ?? $data['error'] ?? 'Token request failed';
+
+            Log::warning('Passport password grant failed.', [
+                'status' => $response->getStatusCode(),
+                'error' => $error,
+                'hint' => $error === 'invalid_client'
+                    ? 'oauth_clients may be empty or .env client credentials are stale'
+                    : null,
+                'client_id' => config('services.passport.password_client_id'),
+            ]);
+
             return [
-                'error' => $data['message'] ?? $data['error'] ?? 'Token request failed',
+                'error' => $error,
                 'status' => $response->getStatusCode(),
             ];
         }

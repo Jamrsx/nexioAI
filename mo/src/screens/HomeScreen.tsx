@@ -7,7 +7,9 @@ import {
   View,
 } from 'react-native';
 import { LogoPlaceholder } from '../components/LogoPlaceholder';
+import { PrimaryButton } from '../components/PrimaryButton';
 import { getApiBaseUrl } from '../config/api';
+import { useAuth } from '../context/AuthContext';
 import { initDatabase } from '../db/database';
 import { initializeStoragePaths, storagePaths } from '../storage/paths';
 import { colors } from '../theme/colors';
@@ -19,6 +21,7 @@ type InitState = {
 };
 
 export function HomeScreen() {
+  const { user, logout } = useAuth();
   const [state, setState] = useState<InitState>({
     loading: true,
     error: null,
@@ -50,9 +53,11 @@ export function HomeScreen() {
       showsVerticalScrollIndicator={false}>
       <LogoPlaceholder size="large" />
 
-      <Text style={styles.heading}>Offline-first AI</Text>
+      <Text style={styles.heading}>
+        Hello{user ? `, ${user.name}` : ''}
+      </Text>
       <Text style={styles.body}>
-        Chunk 3 shell is ready. Login, chat, and sync arrive in the next chunks.
+        You are signed in. Chat and sync arrive in the next chunks.
       </Text>
 
       {state.loading && (
@@ -81,8 +86,22 @@ export function HomeScreen() {
 
           <Text style={[styles.statusLabel, styles.mt]}>Folders</Text>
           <Text style={styles.statusValue}>models · cache · data · downloads · logs</Text>
+
+          {user && (
+            <>
+              <Text style={[styles.statusLabel, styles.mt]}>Signed in as</Text>
+              <Text style={styles.statusValue}>{user.email}</Text>
+            </>
+          )}
         </View>
       )}
+
+      <PrimaryButton
+        title="Sign out"
+        variant="danger"
+        onPress={() => logout()}
+        style={styles.logout}
+      />
     </ScrollView>
   );
 }
@@ -147,5 +166,9 @@ const styles = StyleSheet.create({
   },
   mt: {
     marginTop: 12,
+  },
+  logout: {
+    width: '100%',
+    marginTop: 20,
   },
 });

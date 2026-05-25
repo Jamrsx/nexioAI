@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\ApiTokenIssuer;
 use App\Services\PassportTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Laravel\Passport\Passport;
@@ -15,6 +17,7 @@ use Laravel\Passport\RefreshToken;
 class AuthController extends Controller
 {
     public function __construct(
+        protected ApiTokenIssuer $tokenIssuer,
         protected PassportTokenService $tokenService,
     ) {}
 
@@ -26,19 +29,21 @@ class AuthController extends Controller
             'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
-        $user = User::query()->create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => $validated['password'],
-        ]);
+        try {
+            $user = null;
+            $tokens = null;
 
-        $tokens = $this->tokenService->issuePasswordGrantToken(
-            $validated['email'],
-            $validated['password'],
-        );
+            DB::transaction(function () use ($validated, &$user, &$tokens) {
+                $user = User::query()->create([
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'password' => $validated['password'],
+                ]);
 
-        if (isset($tokens['error'])) {
-            return response()->json(['message' => $tokens['error']], 500);
+                $tokens = $this->tokenIssuer->forUser($user);
+            });
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => $exception->getMessage()], 500);
         }
 
         return response()->json([
@@ -62,18 +67,9 @@ class AuthController extends Controller
             ]);
         }
 
-        $tokens = $this->tokenService->issuePasswordGrantToken(
-            $validated['email'],
-            $validated['password'],
-        );
-
-        if (isset($tokens['error'])) {
-            return response()->json(['message' => $tokens['error']], 401);
-        }
-
         return response()->json([
             'user' => $user,
-            ...$tokens,
+            ...$this->tokenIssuer->forUser($user),
         ]);
     }
 
