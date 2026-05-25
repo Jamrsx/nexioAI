@@ -3,7 +3,10 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
+import { ChatScreen } from '../screens/ChatScreen';
 import { HomeScreen } from '../screens/HomeScreen';
+import { ModelsScreen } from '../screens/ModelsScreen';
+import { ChatProvider } from '../context/ChatContext';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { colors } from '../theme/colors';
@@ -14,7 +17,9 @@ export type AuthStackParamList = {
 };
 
 export type MainStackParamList = {
-  Home: undefined;
+  Chat: undefined;
+  Settings: undefined;
+  Models: undefined;
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -58,19 +63,31 @@ function AuthNavigator() {
 
 function MainNavigator() {
   return (
-    <MainStack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.surface },
-        headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '600' },
-        contentStyle: { backgroundColor: colors.background },
-      }}>
-      <MainStack.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{ title: 'NexioAI' }}
-      />
-    </MainStack.Navigator>
+    <ChatProvider>
+      <MainStack.Navigator
+        screenOptions={{
+          headerStyle: { backgroundColor: colors.surface },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '600' },
+          contentStyle: { backgroundColor: colors.background },
+        }}>
+        <MainStack.Screen
+          name="Chat"
+          component={ChatScreen}
+          options={{ headerShown: false }}
+        />
+        <MainStack.Screen
+          name="Settings"
+          component={HomeScreen}
+          options={{ title: 'Settings' }}
+        />
+        <MainStack.Screen
+          name="Models"
+          component={ModelsScreen}
+          options={{ title: 'Offline models' }}
+        />
+      </MainStack.Navigator>
+    </ChatProvider>
   );
 }
 

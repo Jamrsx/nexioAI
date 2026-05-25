@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +15,9 @@ import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { initDatabase } from '../db/database';
 import { seedPendingTestConversation } from '../db/syncRepository';
+import { getActiveModel } from '../services/modelStorage';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { MainStackParamList } from '../navigation/AppNavigator';
 import { initializeStoragePaths, storagePaths } from '../storage/paths';
 import { colors } from '../theme/colors';
 
@@ -43,7 +47,9 @@ const syncStatusLabel = (
   }
 };
 
-export function HomeScreen() {
+type Props = NativeStackScreenProps<MainStackParamList, 'Settings'>;
+
+export function HomeScreen({ navigation }: Props) {
   const { user, logout } = useAuth();
   const {
     status: syncStatus,
@@ -60,6 +66,7 @@ export function HomeScreen() {
     dbReady: false,
   });
   const [seeding, setSeeding] = useState(false);
+  const [activeModelName, setActiveModelName] = useState<string | null>(null);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -69,7 +76,9 @@ export function HomeScreen() {
         await initDatabase();
         setState({ loading: false, error: null, dbReady: true });
         await refreshPendingCounts();
-        console.log('[NexioAI] HomeScreen bootstrap done');
+        const active = await getActiveModel();
+        setActiveModelName(active?.entry.name ?? null);
+        console.log('[NexioAI] Settings bootstrap done');
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Initialization failed';
         console.error('[NexioAI] Bootstrap error:', message);
@@ -79,6 +88,14 @@ export function HomeScreen() {
 
     bootstrap();
   }, [refreshPendingCounts]);
+
+  useFocusEffect(
+    useCallback(() => {
+      getActiveModel().then(active => {
+        setActiveModelName(active?.entry.name ?? null);
+      });
+    }, []),
+  );
 
   const handleSeedTestChat = async () => {
     setSeeding(true);
@@ -109,7 +126,7 @@ export function HomeScreen() {
         Hello{user ? `, ${user.name}` : ''}
       </Text>
       <Text style={styles.body}>
-        Chunk 5: conversations and messages sync to MySQL when you are online.
+        Sync, model download, and account options.
       </Text>
 
       {state.loading && (
@@ -151,6 +168,22 @@ export function HomeScreen() {
               />
             )}
           </View>
+
+          <View style={styles.statusCard}>
+            <Text style={styles.statusLabel}>Offline model</Text>
+            <Text style={styles.statusValue}>
+              {activeModelName
+                ? `Active: ${activeModelName}`
+                : 'None active — download a model for on-device chat'}
+            </Text>
+          </View>
+
+          <PrimaryButton
+            title="Manage offline models"
+            variant="secondary"
+            onPress={() => navigation.navigate('Models')}
+            style={styles.actionBtn}
+          />
 
           <PrimaryButton
             title="Sync now"
