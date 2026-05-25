@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,15 +12,24 @@ import {
 } from 'react-native';
 import { LogoPlaceholder } from '../components/LogoPlaceholder';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { ModelProgressBar } from '../components/models/ModelProgressBar';
+import { SettingsGroup } from '../components/settings/SettingsGroup';
+import { SettingsRow } from '../components/settings/SettingsRow';
+import { SettingsSectionHeader } from '../components/settings/SettingsSectionHeader';
+import {
+  SettingsStatusLine,
+  type StatusTone,
+} from '../components/settings/SettingsStatusLine';
 import { getApiBaseUrl } from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { useModelDownloads } from '../context/ModelDownloadContext';
 import { useSync } from '../context/SyncContext';
-import { initDatabase } from '../db/database';
+import { ensureDatabaseReady } from '../db/database';
 import { seedPendingTestConversation } from '../db/syncRepository';
 import { getActiveModel } from '../services/modelStorage';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../navigation/AppNavigator';
-import { initializeStoragePaths, storagePaths } from '../storage/paths';
+import { storagePaths } from '../storage/paths';
 import { colors } from '../theme/colors';
 
 type InitState = {
@@ -27,23 +38,29 @@ type InitState = {
   dbReady: boolean;
 };
 
-const syncStatusLabel = (
+const syncStatusCopy = (
   status: string,
   pendingMessages: number,
-): string => {
+): { message: string; tone: StatusTone } => {
   switch (status) {
     case 'syncing':
-      return 'Syncing to server…';
+      return { message: 'Syncing to server…', tone: 'active' };
     case 'success':
-      return 'Last sync succeeded';
+      return { message: 'Up to date with server', tone: 'success' };
     case 'error':
-      return 'Sync failed — tap Sync now to retry';
+      return { message: 'Sync failed — tap Sync now', tone: 'error' };
     case 'offline':
-      return 'Offline — pending items will sync when online';
+      return {
+        message: 'Offline — will sync when connected',
+        tone: 'warning',
+      };
     default:
       return pendingMessages > 0
-        ? 'Pending items waiting to sync'
-        : 'All local messages synced';
+        ? {
+            message: `${pendingMessages} message(s) waiting to sync`,
+            tone: 'warning',
+          }
+        : { message: 'All local messages synced', tone: 'success' };
   }
 };
 
@@ -51,6 +68,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'Settings'>;
 
 export function HomeScreen({ navigation }: Props) {
   const { user, logout } = useAuth();
+  const { downloads: modelDownloads } = useModelDownloads();
   const {
     status: syncStatus,
     pendingConversations,
@@ -65,37 +83,58 @@ export function HomeScreen({ navigation }: Props) {
     error: null,
     dbReady: false,
   });
+  const [refreshing, setRefreshing] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [activeModelName, setActiveModelName] = useState<string | null>(null);
+
+  const refreshSettings = useCallback(async () => {
+    await refreshPendingCounts();
+    const active = await getActiveModel();
+    setActiveModelName(active?.entry.name ?? null);
+  }, [refreshPendingCounts]);
 
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        console.log('[NexioAI] HomeScreen bootstrap start');
-        await initializeStoragePaths();
-        await initDatabase();
+        console.log('[NexioAI] Settings bootstrap start');
+        await ensureDatabaseReady();
         setState({ loading: false, error: null, dbReady: true });
-        await refreshPendingCounts();
-        const active = await getActiveModel();
-        setActiveModelName(active?.entry.name ?? null);
+        await refreshSettings();
         console.log('[NexioAI] Settings bootstrap done');
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Initialization failed';
+        const message =
+          err instanceof Error ? err.message : 'Initialization failed';
         console.error('[NexioAI] Bootstrap error:', message);
         setState({ loading: false, error: message, dbReady: false });
       }
     };
 
     bootstrap();
-  }, [refreshPendingCounts]);
+  }, [refreshSettings]);
 
   useFocusEffect(
     useCallback(() => {
-      getActiveModel().then(active => {
-        setActiveModelName(active?.entry.name ?? null);
-      });
-    }, []),
+      if (state.dbReady) {
+        refreshSettings();
+      }
+    }, [state.dbReady, refreshSettings]),
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (!state.dbReady) {
+        await ensureDatabaseReady();
+        setState({ loading: false, error: null, dbReady: true });
+      }
+      await refreshSettings();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Refresh failed';
+      setState(prev => ({ ...prev, error: message }));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [state.dbReady, refreshSettings]);
 
   const handleSeedTestChat = async () => {
     setSeeding(true);
@@ -108,121 +147,176 @@ export function HomeScreen({ navigation }: Props) {
         'Two offline messages are pending. Tap Sync now or wait until you are online.',
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not create test chat';
+      const message =
+        err instanceof Error ? err.message : 'Could not create test chat';
       Alert.alert('Error', message);
     } finally {
       setSeeding(false);
     }
   };
 
+  const syncCopy = syncStatusCopy(syncStatus, pendingMessages);
+  const modelDownloadPercent = useMemo(() => {
+    if (modelDownloads.length === 0) {
+      return 0;
+    }
+    return Math.round(
+      modelDownloads.reduce((sum, d) => sum + d.percent, 0) /
+        modelDownloads.length,
+    );
+  }, [modelDownloads]);
+
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}>
-      <LogoPlaceholder size="large" />
-
-      <Text style={styles.heading}>
-        Hello{user ? `, ${user.name}` : ''}
-      </Text>
-      <Text style={styles.body}>
-        Sync, model download, and account options.
-      </Text>
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.primary}
+        />
+      }>
+      <View style={styles.profileCard}>
+        <View style={styles.profileMain}>
+          <View style={styles.avatarRing}>
+            <LogoPlaceholder size="small" />
+          </View>
+          <View style={styles.profileText}>
+            <Text style={styles.profileName} numberOfLines={1}>
+              {user?.name ?? 'Signed in'}
+            </Text>
+            <Text style={styles.profileEmail} numberOfLines={1}>
+              {user?.email ?? '—'}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.profileHint}>
+          Account, sync, and on-device AI configuration.
+        </Text>
+      </View>
 
       {state.loading && (
-        <View style={styles.statusCard}>
+        <View style={styles.feedbackCard}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.statusText}>Setting up storage and database…</Text>
+          <Text style={styles.feedbackText}>
+            Preparing local storage and database…
+          </Text>
         </View>
       )}
 
       {state.error && (
-        <View style={[styles.statusCard, styles.errorCard]}>
-          <Text style={styles.errorText}>{state.error}</Text>
+        <View style={[styles.feedbackCard, styles.feedbackError]}>
+          <Text style={styles.feedbackErrorText}>{state.error}</Text>
         </View>
       )}
 
       {state.dbReady && (
         <>
-          <View style={styles.statusCard}>
-            <Text style={styles.statusLabel}>Sync</Text>
-            <Text style={styles.statusValue}>
-              {syncStatusLabel(syncStatus, pendingMessages)}
-            </Text>
-            <Text style={[styles.statusValue, styles.mt]}>
-              Pending: {pendingConversations} conversation(s), {pendingMessages}{' '}
-              message(s)
-            </Text>
+          <SettingsSectionHeader title="Offline AI" />
+          <SettingsGroup>
+            <SettingsStatusLine
+              label="Active model"
+              value={
+                activeModelName ??
+                'No model selected — open catalog to download'
+              }
+              tone={activeModelName ? 'success' : 'warning'}
+            />
+            {modelDownloads.length > 0 && (
+              <View style={styles.progressInset}>
+                <ModelProgressBar
+                  percent={modelDownloadPercent}
+                  label={
+                    modelDownloads.length === 1
+                      ? 'Model download'
+                      : `${modelDownloads.length} downloads`
+                  }
+                />
+              </View>
+            )}
+            <SettingsRow
+              title="Manage offline models"
+              subtitle="Download, remove, and switch GGUF models"
+              onPress={() => navigation.navigate('Models')}
+              isLast
+            />
+          </SettingsGroup>
+
+          <SettingsSectionHeader title="Sync" />
+          <SettingsGroup>
+            <SettingsStatusLine
+              label="Status"
+              value={syncCopy.message}
+              tone={syncCopy.tone}
+              loading={syncStatus === 'syncing'}
+            />
+            <View style={styles.metricsRow}>
+              <View style={styles.metricChip}>
+                <Text style={styles.metricValue}>{pendingConversations}</Text>
+                <Text style={styles.metricLabel}>Chats pending</Text>
+              </View>
+              <View style={styles.metricDivider} />
+              <View style={styles.metricChip}>
+                <Text style={styles.metricValue}>{pendingMessages}</Text>
+                <Text style={styles.metricLabel}>Msgs pending</Text>
+              </View>
+            </View>
             {lastSyncedAt && (
-              <Text style={[styles.statusMuted, styles.mt]}>
-                Last synced: {new Date(lastSyncedAt).toLocaleString()}
+              <Text style={styles.metaLine}>
+                Last sync · {new Date(lastSyncedAt).toLocaleString()}
               </Text>
             )}
             {lastError && (
-              <Text style={[styles.errorText, styles.mt]}>{lastError}</Text>
+              <Text style={styles.errorLine}>{lastError}</Text>
             )}
-            {syncStatus === 'syncing' && (
-              <ActivityIndicator
-                color={colors.primary}
-                style={styles.syncSpinner}
-              />
-            )}
-          </View>
-
-          <View style={styles.statusCard}>
-            <Text style={styles.statusLabel}>Offline model</Text>
-            <Text style={styles.statusValue}>
-              {activeModelName
-                ? `Active: ${activeModelName}`
-                : 'None active — download a model for on-device chat'}
-            </Text>
-          </View>
-
-          <PrimaryButton
-            title="Manage offline models"
-            variant="secondary"
-            onPress={() => navigation.navigate('Models')}
-            style={styles.actionBtn}
-          />
+          </SettingsGroup>
 
           <PrimaryButton
             title="Sync now"
             onPress={() => runSync()}
             loading={syncStatus === 'syncing'}
-            style={styles.actionBtn}
+            style={styles.primaryAction}
           />
 
-          <PrimaryButton
-            title="Add test offline chat"
-            variant="secondary"
-            onPress={handleSeedTestChat}
-            loading={seeding}
-            style={styles.actionBtn}
-          />
+          <SettingsSectionHeader title="Tools" />
+          <SettingsGroup>
+            <SettingsRow
+              title="Add test offline chat"
+              subtitle="Creates sample messages for sync testing"
+              onPress={handleSeedTestChat}
+              loading={seeding}
+              isLast
+            />
+          </SettingsGroup>
 
-          <View style={styles.statusCard}>
-            <Text style={styles.statusLabel}>API</Text>
-            <Text style={styles.statusValue}>{getApiBaseUrl()}</Text>
-
-            <Text style={[styles.statusLabel, styles.mt]}>Database</Text>
-            <Text style={styles.statusValue}>{storagePaths.databaseFile}</Text>
-
-            {user && (
-              <>
-                <Text style={[styles.statusLabel, styles.mt]}>Signed in as</Text>
-                <Text style={styles.statusValue}>{user.email}</Text>
-              </>
-            )}
-          </View>
+          <SettingsSectionHeader title="System" />
+          <SettingsGroup>
+            <View style={styles.systemRow}>
+              <Text style={styles.systemLabel}>API endpoint</Text>
+              <Text style={styles.systemValue} selectable>
+                {getApiBaseUrl()}
+              </Text>
+            </View>
+            <View style={[styles.systemRow, styles.systemRowBorder]}>
+              <Text style={styles.systemLabel}>Database</Text>
+              <Text style={styles.systemValue} selectable numberOfLines={2}>
+                {storagePaths.databaseFile || '—'}
+              </Text>
+            </View>
+          </SettingsGroup>
         </>
       )}
 
-      <PrimaryButton
-        title="Sign out"
-        variant="danger"
+      <Pressable
         onPress={() => logout()}
-        style={styles.logout}
-      />
+        style={({ pressed }) => [
+          styles.signOutBtn,
+          pressed && styles.signOutPressed,
+        ]}>
+        <Text style={styles.signOutText}>Sign out</Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -233,74 +327,161 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 40,
-    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 36,
   },
-  heading: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '600',
-    marginTop: 24,
-    textAlign: 'center',
-  },
-  body: {
-    color: colors.textMuted,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  statusCard: {
-    width: '100%',
-    marginTop: 20,
+  profileCard: {
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 8,
+  },
+  profileMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarRing: {
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 123, 255, 0.35)',
+    padding: 2,
+  },
+  profileText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profileName: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  profileEmail: {
+    color: colors.textMuted,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  profileHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 12,
+  },
+  feedbackCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  errorCard: {
-    borderColor: colors.danger,
-  },
-  statusText: {
+  feedbackText: {
     color: colors.textMuted,
-    marginTop: 12,
-    textAlign: 'center',
+    fontSize: 13,
+    flex: 1,
   },
-  statusLabel: {
+  feedbackError: {
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  feedbackErrorText: {
+    color: colors.danger,
+    fontSize: 13,
+    flex: 1,
+  },
+  progressInset: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  metricChip: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  metricDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+    marginVertical: 2,
+  },
+  metricValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  metricLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  metaLine: {
     color: colors.textMuted,
     fontSize: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  errorLine: {
+    color: colors.danger,
+    fontSize: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    lineHeight: 16,
+  },
+  primaryAction: {
+    marginTop: 12,
+  },
+  systemRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  systemRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  systemLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  statusValue: {
+  systemValue: {
     color: colors.text,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  statusMuted: {
-    color: colors.textMuted,
     fontSize: 12,
+    marginTop: 6,
+    lineHeight: 17,
+    fontFamily: 'monospace',
   },
-  errorText: {
+  signOutBtn: {
+    marginTop: 28,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    alignItems: 'center',
+  },
+  signOutPressed: {
+    opacity: 0.88,
+  },
+  signOutText: {
     color: colors.danger,
-    fontSize: 13,
-  },
-  mt: {
-    marginTop: 8,
-  },
-  syncSpinner: {
-    marginTop: 12,
-  },
-  actionBtn: {
-    width: '100%',
-    marginTop: 12,
-  },
-  logout: {
-    width: '100%',
-    marginTop: 20,
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

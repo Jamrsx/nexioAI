@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -6,6 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { ConfirmModal } from '../ConfirmModal';
 import type { LocalConversation } from '../../types/chat';
 import { colors } from '../../theme/colors';
 
@@ -14,6 +15,7 @@ type Props = {
   activeId: number | null;
   onSelect: (id: number) => void;
   onNewChat: () => void;
+  onDelete: (id: number) => void;
 };
 
 const formatWhen = (iso: string): string => {
@@ -35,7 +37,23 @@ export function ChatSidebar({
   activeId,
   onSelect,
   onNewChat,
+  onDelete,
 }: Props) {
+  const [pendingDelete, setPendingDelete] = useState<LocalConversation | null>(
+    null,
+  );
+
+  const pendingTitle = pendingDelete?.title ?? 'New chat';
+
+  const handleConfirmDelete = () => {
+    if (!pendingDelete) {
+      return;
+    }
+    console.log('[NexioAI] User confirmed delete:', pendingDelete.id);
+    onDelete(pendingDelete.id);
+    setPendingDelete(null);
+  };
+
   return (
     <View style={styles.container}>
       <Pressable style={styles.newChatBtn} onPress={onNewChat}>
@@ -53,23 +71,43 @@ export function ChatSidebar({
         }
         renderItem={({ item }) => {
           const active = item.id === activeId;
+          const title = item.title ?? 'New chat';
 
           return (
-            <Pressable
-              style={[styles.item, active && styles.itemActive]}
-              onPress={() => onSelect(item.id)}>
-              <Text style={styles.itemTitle} numberOfLines={1}>
-                {item.title ?? 'New chat'}
-              </Text>
-              <View style={styles.itemMeta}>
-                <Text style={styles.itemTime}>{formatWhen(item.updated_at)}</Text>
-                {item.sync_status === 'pending' && (
-                  <Text style={styles.pendingBadge}>pending</Text>
-                )}
-              </View>
-            </Pressable>
+            <View style={[styles.itemRow, active && styles.itemActive]}>
+              <Pressable
+                style={styles.itemMain}
+                onPress={() => onSelect(item.id)}>
+                <Text style={styles.itemTitle} numberOfLines={1}>
+                  {title}
+                </Text>
+                <View style={styles.itemMeta}>
+                  <Text style={styles.itemTime}>{formatWhen(item.updated_at)}</Text>
+                  {item.sync_status === 'pending' && (
+                    <Text style={styles.pendingBadge}>pending</Text>
+                  )}
+                </View>
+              </Pressable>
+              <Pressable
+                style={styles.deleteBtn}
+                onPress={() => setPendingDelete(item)}
+                hitSlop={8}
+                accessibilityLabel={`Delete ${title}`}>
+                <Text style={styles.deleteIcon}>×</Text>
+              </Pressable>
+            </View>
           );
         }}
+      />
+
+      <ConfirmModal
+        visible={pendingDelete != null}
+        title="Delete chat"
+        message={`Remove "${pendingTitle}" from this device? This cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setPendingDelete(null)}
       />
     </View>
   );
@@ -107,16 +145,23 @@ const styles = StyleSheet.create({
   list: {
     paddingBottom: 24,
   },
-  item: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginHorizontal: 8,
+    marginBottom: 4,
     borderRadius: 8,
   },
   itemActive: {
     backgroundColor: colors.surfaceElevated,
     borderWidth: 1,
     borderColor: colors.primary,
+  },
+  itemMain: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    minWidth: 0,
   },
   itemTitle: {
     color: colors.text,
@@ -139,6 +184,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     textTransform: 'uppercase',
+  },
+  deleteBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  deleteIcon: {
+    color: colors.danger,
+    fontSize: 22,
+    fontWeight: '600',
+    lineHeight: 24,
   },
   empty: {
     color: colors.textMuted,

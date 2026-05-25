@@ -182,6 +182,15 @@ export const insertMessage = async (input: {
   };
 };
 
+export const deleteConversation = async (conversationId: number): Promise<void> => {
+  const db = getDatabase();
+  await db.execute('DELETE FROM messages WHERE conversation_id = ?', [
+    conversationId,
+  ]);
+  await db.execute('DELETE FROM conversations WHERE id = ?', [conversationId]);
+  console.log('[NexioAI] Deleted conversation:', conversationId);
+};
+
 export const deriveTitleFromMessage = (content: string): string => {
   const trimmed = content.trim().replace(/\s+/g, ' ');
   if (trimmed.length <= 48) {

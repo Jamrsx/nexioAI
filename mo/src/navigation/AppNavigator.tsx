@@ -7,6 +7,7 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ModelsScreen } from '../screens/ModelsScreen';
 import { ChatProvider } from '../context/ChatContext';
+import { ModelDownloadProvider } from '../context/ModelDownloadContext';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { colors } from '../theme/colors';
@@ -63,8 +64,9 @@ function AuthNavigator() {
 
 function MainNavigator() {
   return (
-    <ChatProvider>
-      <MainStack.Navigator
+    <ModelDownloadProvider>
+      <ChatProvider>
+        <MainStack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.text,
@@ -86,8 +88,9 @@ function MainNavigator() {
           component={ModelsScreen}
           options={{ title: 'Offline models' }}
         />
-      </MainStack.Navigator>
-    </ChatProvider>
+        </MainStack.Navigator>
+      </ChatProvider>
+    </ModelDownloadProvider>
   );
 }
 

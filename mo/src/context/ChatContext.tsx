@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import {
   createConversation,
+  deleteConversation as deleteConversationRecord,
   deriveTitleFromMessage,
   getConversationById,
   insertMessage,
@@ -16,10 +17,13 @@ import {
   listMessages,
   updateConversationTitle,
 } from '../db/chatRepository';
-import { initDatabase } from '../db/database';
-import { initializeStoragePaths } from '../storage/paths';
+import { ensureDatabaseReady } from '../db/database';
 import type { LocalConversation, LocalMessage } from '../types/chat';
-import { generateAssistantReply } from '../services/llamaService';
+import {
+  clearLlamaConversationCache,
+  generateAssistantReply,
+  initLlama,
+} from '../services/llamaService';
 import { useSync } from './SyncContext';
 
 type ChatContextValue = {
@@ -32,6 +36,7 @@ type ChatContextValue = {
   refreshConversations: () => Promise<void>;
   selectConversation: (id: number) => Promise<void>;
   startNewChat: () => Promise<void>;
+  deleteConversation: (id: number) => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
 };
 
@@ -66,6 +71,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       setActiveConversation(conversation);
       await loadMessages(id);
+      await clearLlamaConversationCache();
       setSidebarOpen(false);
       console.log('[NexioAI] Selected conversation:', id);
     },
@@ -77,9 +83,43 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     await refreshConversations();
     setActiveConversation(conversation);
     setMessages([]);
+    await clearLlamaConversationCache();
     setSidebarOpen(false);
     console.log('[NexioAI] New chat started:', conversation.id);
   }, [refreshConversations]);
+
+  const deleteConversation = useCallback(
+    async (id: number) => {
+      await ensureDatabaseReady();
+      await deleteConversationRecord(id);
+      console.log('[NexioAI] Removed conversation from device:', id);
+
+      const remaining = await listConversations();
+      setConversations(remaining);
+
+      if (activeConversation?.id === id) {
+        if (remaining.length > 0) {
+          const next = remaining[0];
+          setActiveConversation(next);
+          await loadMessages(next.id);
+          await clearLlamaConversationCache();
+        } else {
+          const conversation = await createConversation();
+          setActiveConversation(conversation);
+          setMessages([]);
+          setConversations([conversation]);
+          await clearLlamaConversationCache();
+        }
+      }
+
+      await refreshPendingCounts();
+    },
+    [
+      activeConversation?.id,
+      loadMessages,
+      refreshPendingCounts,
+    ],
+  );
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -98,6 +138,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setIsSending(true);
 
       try {
+        await ensureDatabaseReady();
+
         const userMessage = await insertMessage({
           conversationId: conversation.id,
           role: 'user',
@@ -118,10 +160,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           setActiveConversation(conversation);
         }
 
-        const { content, modelName } = await generateAssistantReply(
-          nextMessages,
-          trimmed,
-        );
+        const { content, modelName } = await generateAssistantReply(nextMessages);
 
         const assistantMessage = await insertMessage({
           conversationId: conversation.id,
@@ -133,6 +172,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setMessages(current => [...current, assistantMessage]);
         await refreshConversations();
         await refreshPendingCounts();
+        // Online: upload pending chats to MySQL. Offline: stays local until connected.
         runSync();
       } finally {
         setIsSending(false);
@@ -157,8 +197,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     bootstrappedRef.current = true;
 
     const bootstrap = async () => {
-      await initializeStoragePaths();
-      await initDatabase();
+      await ensureDatabaseReady();
+      const llamaOk = await initLlama();
+      console.log('[NexioAI] Chat bootstrap — local model loaded:', llamaOk);
       await refreshConversations();
       const rows = await listConversations();
       if (rows.length > 0) {
@@ -182,6 +223,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       refreshConversations,
       selectConversation,
       startNewChat,
+      deleteConversation,
       sendMessage,
     }),
     [
@@ -193,6 +235,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       refreshConversations,
       selectConversation,
       startNewChat,
+      deleteConversation,
       sendMessage,
     ],
   );

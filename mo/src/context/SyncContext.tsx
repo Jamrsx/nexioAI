@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
+import { ensureDatabaseReady } from '../db/database';
 import { getPendingCounts } from '../services/syncService';
 import { syncPending } from '../services/syncService';
 import { useAuth } from './AuthContext';
@@ -45,6 +46,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   const refreshPendingCounts = useCallback(async () => {
     try {
+      await ensureDatabaseReady();
       const counts = await getPendingCounts();
       setPendingConversations(counts.conversations);
       setPendingMessages(counts.messages);
@@ -72,6 +74,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     setLastError(null);
 
     try {
+      await ensureDatabaseReady();
       const result = await syncPending();
 
       if (result.skippedReason === 'nothing_pending') {

@@ -14,7 +14,7 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
     sizeMb: 520,
     minRamMb: 2048,
     contextSize: 2048,
-    maxPredict: 256,
+    maxPredict: 640,
     tier: 'light',
   },
   {
@@ -26,7 +26,7 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
     sizeMb: 640,
     minRamMb: 3072,
     contextSize: 2048,
-    maxPredict: 256,
+    maxPredict: 640,
     tier: 'balanced',
   },
   {
@@ -38,7 +38,7 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
     sizeMb: 750,
     minRamMb: 4096,
     contextSize: 2048,
-    maxPredict: 256,
+    maxPredict: 640,
     tier: 'quality',
   },
   {
@@ -50,7 +50,7 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
     sizeMb: 1100,
     minRamMb: 6144,
     contextSize: 2048,
-    maxPredict: 256,
+    maxPredict: 640,
     tier: 'quality',
   },
 ];

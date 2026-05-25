@@ -47,3 +47,35 @@ export const initializeStoragePaths = async (): Promise<typeof storagePaths> => 
 
   return storagePaths;
 };
+
+/** Idempotent — safe to call before downloads or DB access. */
+export const ensureStorageReady = async (): Promise<typeof storagePaths> => {
+  if (!storagePaths.data) {
+    return initializeStoragePaths();
+  }
+
+  await ensureDirectory(storagePaths.root);
+  await ensureDirectory(storagePaths.models);
+  await ensureDirectory(storagePaths.data);
+
+  return storagePaths;
+};
+
+/** Creates a directory and any missing parents (Android mkdir is not recursive). */
+export const ensureDirectory = async (dirPath: string): Promise<void> => {
+  if (!dirPath) {
+    throw new Error('Directory path is empty — call ensureStorageReady() first.');
+  }
+
+  if (await RNFS.exists(dirPath)) {
+    return;
+  }
+
+  const parent = dirPath.replace(/\/[^/]+$/, '');
+  if (parent && parent !== dirPath) {
+    await ensureDirectory(parent);
+  }
+
+  await RNFS.mkdir(dirPath);
+  console.log('[NexioAI] Created directory:', dirPath);
+};

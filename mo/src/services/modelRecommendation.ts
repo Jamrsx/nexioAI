@@ -5,7 +5,7 @@ import type {
   ModelCatalogItem,
   ModelFitLevel,
 } from '../types/models';
-import { listInstalledModels } from './modelStorage';
+import { isModelDownloaded, listInstalledModels } from './modelStorage';
 
 const fitLabel: Record<ModelFitLevel, string> = {
   recommended: 'Recommended for your device',
@@ -47,17 +47,20 @@ export const buildModelCatalogItems = async (
   const installedMap = new Map(installed.map(row => [row.modelId, row]));
   const activeId = installed.find(row => row.isActive)?.modelId;
 
-  const items = MODEL_CATALOG.map(entry => {
-    const fit = scoreModelFit(entry, specs.totalRamMb, specs.freeStorageMb);
+  const items = await Promise.all(
+    MODEL_CATALOG.map(async entry => {
+      const fit = scoreModelFit(entry, specs.totalRamMb, specs.freeStorageMb);
+      const onDisk = await isModelDownloaded(entry.id);
 
-    return {
-      ...entry,
-      fit,
-      fitLabel: fitLabel[fit],
-      downloaded: installedMap.has(entry.id),
-      isActive: activeId === entry.id,
-    };
-  });
+      return {
+        ...entry,
+        fit,
+        fitLabel: fitLabel[fit],
+        downloaded: onDisk,
+        isActive: activeId === entry.id && onDisk,
+      };
+    }),
+  );
 
   const order: Record<ModelFitLevel, number> = {
     recommended: 0,
