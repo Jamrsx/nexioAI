@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +11,9 @@ import { LogoPlaceholder } from '../components/LogoPlaceholder';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { getApiBaseUrl } from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { useSync } from '../context/SyncContext';
 import { initDatabase } from '../db/database';
+import { seedPendingTestConversation } from '../db/syncRepository';
 import { initializeStoragePaths, storagePaths } from '../storage/paths';
 import { colors } from '../theme/colors';
 
@@ -20,13 +23,43 @@ type InitState = {
   dbReady: boolean;
 };
 
+const syncStatusLabel = (
+  status: string,
+  pendingMessages: number,
+): string => {
+  switch (status) {
+    case 'syncing':
+      return 'Syncing to server…';
+    case 'success':
+      return 'Last sync succeeded';
+    case 'error':
+      return 'Sync failed — tap Sync now to retry';
+    case 'offline':
+      return 'Offline — pending items will sync when online';
+    default:
+      return pendingMessages > 0
+        ? 'Pending items waiting to sync'
+        : 'All local messages synced';
+  }
+};
+
 export function HomeScreen() {
   const { user, logout } = useAuth();
+  const {
+    status: syncStatus,
+    pendingConversations,
+    pendingMessages,
+    lastSyncedAt,
+    lastError,
+    refreshPendingCounts,
+    runSync,
+  } = useSync();
   const [state, setState] = useState<InitState>({
     loading: true,
     error: null,
     dbReady: false,
   });
+  const [seeding, setSeeding] = useState(false);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -35,6 +68,7 @@ export function HomeScreen() {
         await initializeStoragePaths();
         await initDatabase();
         setState({ loading: false, error: null, dbReady: true });
+        await refreshPendingCounts();
         console.log('[NexioAI] HomeScreen bootstrap done');
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Initialization failed';
@@ -44,7 +78,25 @@ export function HomeScreen() {
     };
 
     bootstrap();
-  }, []);
+  }, [refreshPendingCounts]);
+
+  const handleSeedTestChat = async () => {
+    setSeeding(true);
+    try {
+      const ids = await seedPendingTestConversation();
+      await refreshPendingCounts();
+      console.log('[NexioAI] Test chat seeded:', ids);
+      Alert.alert(
+        'Test chat added',
+        'Two offline messages are pending. Tap Sync now or wait until you are online.',
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not create test chat';
+      Alert.alert('Error', message);
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   return (
     <ScrollView
@@ -57,7 +109,7 @@ export function HomeScreen() {
         Hello{user ? `, ${user.name}` : ''}
       </Text>
       <Text style={styles.body}>
-        You are signed in. Chat and sync arrive in the next chunks.
+        Chunk 5: conversations and messages sync to MySQL when you are online.
       </Text>
 
       {state.loading && (
@@ -74,26 +126,62 @@ export function HomeScreen() {
       )}
 
       {state.dbReady && (
-        <View style={styles.statusCard}>
-          <Text style={styles.statusLabel}>API</Text>
-          <Text style={styles.statusValue}>{getApiBaseUrl()}</Text>
+        <>
+          <View style={styles.statusCard}>
+            <Text style={styles.statusLabel}>Sync</Text>
+            <Text style={styles.statusValue}>
+              {syncStatusLabel(syncStatus, pendingMessages)}
+            </Text>
+            <Text style={[styles.statusValue, styles.mt]}>
+              Pending: {pendingConversations} conversation(s), {pendingMessages}{' '}
+              message(s)
+            </Text>
+            {lastSyncedAt && (
+              <Text style={[styles.statusMuted, styles.mt]}>
+                Last synced: {new Date(lastSyncedAt).toLocaleString()}
+              </Text>
+            )}
+            {lastError && (
+              <Text style={[styles.errorText, styles.mt]}>{lastError}</Text>
+            )}
+            {syncStatus === 'syncing' && (
+              <ActivityIndicator
+                color={colors.primary}
+                style={styles.syncSpinner}
+              />
+            )}
+          </View>
 
-          <Text style={[styles.statusLabel, styles.mt]}>Storage root</Text>
-          <Text style={styles.statusValue}>{storagePaths.root}</Text>
+          <PrimaryButton
+            title="Sync now"
+            onPress={() => runSync()}
+            loading={syncStatus === 'syncing'}
+            style={styles.actionBtn}
+          />
 
-          <Text style={[styles.statusLabel, styles.mt]}>Database</Text>
-          <Text style={styles.statusValue}>{storagePaths.databaseFile}</Text>
+          <PrimaryButton
+            title="Add test offline chat"
+            variant="secondary"
+            onPress={handleSeedTestChat}
+            loading={seeding}
+            style={styles.actionBtn}
+          />
 
-          <Text style={[styles.statusLabel, styles.mt]}>Folders</Text>
-          <Text style={styles.statusValue}>models · cache · data · downloads · logs</Text>
+          <View style={styles.statusCard}>
+            <Text style={styles.statusLabel}>API</Text>
+            <Text style={styles.statusValue}>{getApiBaseUrl()}</Text>
 
-          {user && (
-            <>
-              <Text style={[styles.statusLabel, styles.mt]}>Signed in as</Text>
-              <Text style={styles.statusValue}>{user.email}</Text>
-            </>
-          )}
-        </View>
+            <Text style={[styles.statusLabel, styles.mt]}>Database</Text>
+            <Text style={styles.statusValue}>{storagePaths.databaseFile}</Text>
+
+            {user && (
+              <>
+                <Text style={[styles.statusLabel, styles.mt]}>Signed in as</Text>
+                <Text style={styles.statusValue}>{user.email}</Text>
+              </>
+            )}
+          </View>
+        </>
       )}
 
       <PrimaryButton
@@ -134,7 +222,7 @@ const styles = StyleSheet.create({
   },
   statusCard: {
     width: '100%',
-    marginTop: 28,
+    marginTop: 20,
     padding: 16,
     borderRadius: 12,
     backgroundColor: colors.surface,
@@ -160,11 +248,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
+  statusMuted: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
   errorText: {
     color: colors.danger,
-    fontSize: 14,
+    fontSize: 13,
   },
   mt: {
+    marginTop: 8,
+  },
+  syncSpinner: {
+    marginTop: 12,
+  },
+  actionBtn: {
+    width: '100%',
     marginTop: 12,
   },
   logout: {

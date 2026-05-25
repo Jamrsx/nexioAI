@@ -9,12 +9,7 @@ use Laravel\Passport\ClientRepository;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    $client = app(ClientRepository::class)->createPasswordGrantClient('Test Mobile', null, true);
-
-    config([
-        'services.passport.password_client_id' => $client->id,
-        'services.passport.password_client_secret' => $client->plainSecret,
-    ]);
+    app(ClientRepository::class)->createPersonalAccessGrantClient('Test Personal', 'users');
 });
 
 function syncAuthHeaders(): array
